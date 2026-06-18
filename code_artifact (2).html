@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>絕對公平的擲骰子遊戲 (Provably Fair Dice)</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 FontAwesome 圖示 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- 引入 CryptoJS 用於進行 SHA-256 加密計算 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <!-- Google Fonts: Inter & Noto Sans TC -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            background-color: #0f172a;
+        }
+        /* 3D 骰子樣式 */
+        .scene {
+            width: 120px;
+            height: 120px;
+            perspective: 600px;
+            margin: 0 auto;
+        }
+        .cube {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            transform-style: preserve-3d;
+            /* 修正動畫時長：增加為 2.2 秒，並優化 cubic-bezier 使滾動更流暢自然 */
+            transition: transform 2.2s cubic-bezier(0.15, 0.85, 0.35, 1.05);
+        }
+        .cube-face {
+            position: absolute;
+            width: 120px;
+            height: 120px;
+            border: 3px solid #1e293b;
+            background: linear-gradient(135deg, #1e293b, #0f172a);
+            border-radius: 18px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            padding: 12px;
+            box-sizing: border-box;
+            box-shadow: inset 0 0 15px rgba(255, 255, 255, 0.1), 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+        /* 定位各個面 */
+        .face-1 { transform: rotateY(0deg) translateZ(60px); }
+        .face-6 { transform: rotateY(180deg) translateZ(60px); }
+        .face-2 { transform: rotateY(90deg) translateZ(60px); }
+        .face-5 { transform: rotateY(-90deg) translateZ(60px); }
+        .face-3 { transform: rotateX(90deg) translateZ(60px); }
+        .face-4 { transform: rotateX(-90deg) translateZ(60px); }
+
+        /* 點數點 (Dot) 樣式 */
+        .dot {
+            width: 18px;
+            height: 18px;
+            background: radial-gradient(circle, #f43f5e 30%, #be123c 90%);
+            border-radius: 50%;
+            justify-self: center;
+            align-self: center;
+            box-shadow: 0 0 8px rgba(244, 63, 94, 0.6);
+        }
+        /* 其他面的點數改為青綠色/白色以利區分 */
+        .face-2 .dot, .face-3 .dot, .face-4 .dot, .face-5 .dot, .face-6 .dot {
+            background: radial-gradient(circle, #38bdf8 30%, #0369a1 90%);
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+        }
+
+        /* 骰子點數網格定位 */
+        /* 點數 1 */
+        .face-1 .dot-1 { grid-area: 2 / 2; width: 26px; height: 26px; background: radial-gradient(circle, #ef4444 30%, #b91c1c 90%); }
+        /* 點數 2 */
+        .face-2 .dot-1 { grid-area: 1 / 1; }
+        .face-2 .dot-2 { grid-area: 3 / 3; }
+        /* 點數 3 */
+        .face-3 .dot-1 { grid-area: 1 / 1; }
+        .face-3 .dot-2 { grid-area: 2 / 2; }
+        .face-3 .dot-3 { grid-area: 3 / 3; }
+        /* 點數 4 */
+        .face-4 .dot-1 { grid-area: 1 / 1; }
+        .face-4 .dot-2 { grid-area: 1 / 3; }
+        .face-4 .dot-3 { grid-area: 3 / 1; }
+        .face-4 .dot-4 { grid-area: 3 / 3; }
+        /* 點數 5 */
+        .face-5 .dot-1 { grid-area: 1 / 1; }
+        .face-5 .dot-2 { grid-area: 1 / 3; }
+        .face-5 .dot-3 { grid-area: 2 / 2; }
+        .face-5 .dot-4 { grid-area: 3 / 1; }
+        .face-5 .dot-5 { grid-area: 3 / 3; }
+        /* 點數 6 */
+        .face-6 .dot-1 { grid-area: 1 / 1; }
+        .face-6 .dot-2 { grid-area: 1 / 3; }
+        .face-6 .dot-3 { grid-area: 2 / 1; }
+        .face-6 .dot-4 { grid-area: 2 / 3; }
+        .face-6 .dot-5 { grid-area: 3 / 1; }
+        .face-6 .dot-6 { grid-area: 3 / 3; }
+
+        /* 骰子旋轉角度定義 (做為靜態備用參考) */
+        .show-1 { transform: rotateX(0deg) rotateY(0deg); }
+        .show-6 { transform: rotateX(0deg) rotateY(180deg); }
+        .show-2 { transform: rotateX(0deg) rotateY(-90deg); }
+        .show-5 { transform: rotateX(0deg) rotateY(90deg); }
+        .show-3 { transform: rotateX(-90deg) rotateY(0deg); }
+        .show-4 { transform: rotateX(90deg) rotateY(0deg); }
+
+        /* 自訂滾動條 */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+
+        /* 霓虹發光效果 */
+        .neon-glow-primary {
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.15);
+        }
+        .neon-glow-emerald {
+            box-shadow: 0 0 25px rgba(16, 185, 129, 0.2);
+        }
+    </style>
+</head>
+<body class="text-slate-100 min-h-screen bg-slate-950 flex flex-col justify-between">
+
+    <!-- 頂部導航欄 -->
+    <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 px-4 py-4 sm:px-8">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="bg-gradient-to-tr from-indigo-500 to-rose-500 p-2.5 rounded-xl shadow-lg shadow-indigo-500/10">
+                    <i class="fa-solid fa-dice-d20 text-2xl text-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-black tracking-wider bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
+                        FAIRSPIN
+                    </h1>
+                    <p class="text-[10px] text-slate-400 font-mono tracking-widest uppercase">PROVABLY FAIR DICE SIMULATOR</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-4">
+                <div class="bg-slate-950 px-4 py-1.5 rounded-full border border-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-wallet text-amber-500"></i>
+                    <span class="text-slate-400 text-xs">虛擬籌碼:</span>
+                    <span id="player-chips" class="font-mono font-bold text-amber-400">1,000</span>
+                </div>
+                <button onclick="resetChips()" class="text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-full transition-all">
+                    <i class="fa-solid fa-rotate-left mr-1"></i>重設
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主體內容區 -->
+    <main class="max-w-7xl mx-auto w-full px-4 py-6 sm:px-8 flex-grow grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- 左側面板：佔 5 格 -->
+        <div class="lg:col-span-5 flex flex-col gap-6">
+            
+            <!-- 骰子實體展示與投注盤 -->
+            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex flex-col justify-between relative overflow-hidden neon-glow-primary min-h-[460px]">
+                <!-- 背景極簡裝飾 -->
+                <div class="absolute -right-16 -top-16 w-48 h-48 bg-indigo-500/5 rounded-full blur-3xl"></div>
+                
+                <div class="flex justify-between items-center mb-6">
+                    <span class="text-xs font-semibold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping"></span>
+                        即時物理模擬
+                    </span>
+                    <div class="text-right">
+                        <span class="text-[10px] text-slate-500 font-mono">DICE ID: </span>
+                        <span id="current-nonce" class="text-xs text-slate-300 font-mono">#0</span>
+                    </div>
+                </div>
+
+                <!-- 3D 骰子舞台 -->
+                <div class="py-10 flex items-center justify-center">
+                    <div class="scene">
+                        <div id="dice-cube" class="cube show-1">
+                            <!-- 點數 1 -->
+                            <div class="cube-face face-1">
+                                <div class="dot dot-1"></div>
+                            </div>
+                            <!-- 點數 2 -->
+                            <div class="cube-face face-2">
+                                <div class="dot dot-1"></div>
+                                <div class="dot dot-2"></div>
+                            </div>
+                            <!-- 點數 3 -->
+                            <div class="cube-face face-3">
+                                <div class="dot dot-1"></div>
+                                <div class="dot dot-2"></div>
+                                <div class="dot dot-3"></div>
+                            </div>
+                            <!-- 點數 4 -->
+                            <div class="cube-face face-4">
+                                <div class="dot dot-1"></div>
+                                <div class="dot dot-2"></div>
+                                <div class="dot dot-3"></div>
+                                <div class="dot dot-4"></div>
+                            </div>
+                            <!-- 點數 5 -->
+                            <div class="cube-face face-5">
+                                <div class="dot dot-1"></div>
+                                <div class="dot dot-2"></div>
+                                <div class="dot dot-3"></div>
+                                <div class="dot dot-4"></div>
+                                <div class="dot dot-5"></div>
+                            </div>
+                            <!-- 點數 6 -->
+                            <div class="cube-face face-6">
+                                <div class="dot dot-1"></div>
+                                <div class="dot dot-2"></div>
+                                <div class="dot dot-3"></div>
+                                <div class="dot dot-4"></div>
+                                <div class="dot dot-5"></div>
+                                <div class="dot dot-6"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 骰子點數結果大文字 -->
+                <div class="text-center h-8 mb-4">
+                    <p id="roll-result-text" class="text-slate-400 text-sm font-medium transition-opacity duration-300 opacity-0">
+                        骰子點數為: <span class="text-2xl font-black text-indigo-400 ml-1" id="final-rolled-number">-</span>
+                    </p>
+                </div>
+
+                <!-- 投注預測器面板 -->
+                <div class="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 mb-6">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="text-xs font-semibold text-slate-300">選擇您的預測：</span>
+                        <span class="text-[10px] text-slate-400">賠率 2.0x (猜中獎金雙倍)</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2">
+                        <button onclick="selectBetType('small')" id="bet-small" class="py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 hover:text-indigo-200 text-xs font-medium transition-all active:scale-95 flex flex-col items-center">
+                            <span>小 (1-3)</span>
+                        </button>
+                        <button onclick="selectBetType('big')" id="bet-big" class="py-2.5 rounded-xl border border-slate-800 bg-slate-900/50 text-slate-400 hover:bg-slate-800 hover:text-slate-200 text-xs font-medium transition-all active:scale-95 flex flex-col items-center">
+                            <span>大 (4-6)</span>
+                        </button>
+                        <button onclick="selectBetType('none')" id="bet-none" class="py-2.5 rounded-xl border border-slate-800 bg-slate-900/50 text-slate-400 hover:bg-slate-800 hover:text-slate-200 text-xs font-medium transition-all active:scale-95 flex flex-col items-center">
+                            <span>純娛樂 (不投注)</span>
+                        </button>
+                    </div>
+                    
+                    <div id="bet-amount-container" class="mt-4 flex gap-3 items-center">
+                        <span class="text-xs text-slate-400 whitespace-nowrap">下注額:</span>
+                        <div class="flex-grow grid grid-cols-4 gap-1.5">
+                            <button id="bet-btn-10" onclick="setBetAmount(10)" class="py-1 bg-slate-900 hover:bg-slate-800 text-[10px] rounded border border-slate-800 text-slate-300">10</button>
+                            <button id="bet-btn-50" onclick="setBetAmount(50)" class="py-1 bg-slate-900 hover:bg-slate-800 text-[10px] rounded border border-slate-800 text-slate-300">50</button>
+                            <button id="bet-btn-100" onclick="setBetAmount(100)" class="py-1 bg-slate-900 hover:bg-slate-800 text-[10px] rounded border border-slate-800 text-slate-300">100</button>
+                            <button id="bet-btn-double" onclick="multiplyBet(2)" class="py-1 bg-slate-900 hover:bg-slate-800 text-[10px] rounded border border-slate-800 text-slate-300">雙倍</button>
+                        </div>
+                        <input type="number" id="bet-amount" value="50" min="10" class="w-16 bg-slate-900 border border-slate-800 rounded-lg text-center font-mono text-xs text-indigo-300 py-1 focus:outline-none focus:border-indigo-500">
+                    </div>
+                </div>
+
+                <!-- 擲骰子主按鈕 -->
+                <button id="roll-button" onclick="rollDice()" class="w-full bg-gradient-to-r from-indigo-500 via-purple-500 to-rose-500 hover:from-indigo-600 hover:to-rose-600 text-white font-bold py-4 px-6 rounded-2xl shadow-xl shadow-indigo-500/20 active:scale-[0.98] transition-all text-sm tracking-wider flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-gamepad"></i>
+                    公平擲骰 (Roll)
+                </button>
+            </div>
+            
+            <!-- 遊戲統計與機率驗證 -->
+            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex flex-col justify-between">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-sm font-bold text-slate-300 flex items-center gap-2">
+                        <i class="fa-solid fa-chart-simple text-indigo-400"></i>大數據隨機率驗證
+                    </h3>
+                    <span class="text-[10px] text-slate-500 font-mono">理論機率: ~16.67% 每面</span>
+                </div>
+                
+                <!-- 直方圖 -->
+                <div class="space-y-2.5 mb-4" id="distribution-container">
+                    <!-- 點數 1 至 6 的條形圖會動態渲染 -->
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 mt-2">
+                    <button onclick="generateMassRolls(100)" class="py-1.5 bg-slate-950 border border-slate-800 hover:bg-slate-800 rounded-xl text-xs text-slate-300 font-medium transition-all flex items-center justify-center gap-1">
+                        <i class="fa-solid fa-bolt text-indigo-400"></i>模擬 100 抽
+                    </button>
+                    <button onclick="generateMassRolls(1000)" class="py-1.5 bg-slate-950 border border-slate-800 hover:bg-slate-800 rounded-xl text-xs text-slate-300 font-medium transition-all flex items-center justify-center gap-1">
+                        <i class="fa-solid fa-bolt-lightning text-rose-400"></i>模擬 1000 抽
+                    </button>
+                </div>
+                <p class="text-[10px] text-slate-500 mt-2 text-center">
+                    *「模擬抽」利用完全相同的加密演算法批次滾動 Nonce，用大數據證明分佈百分之百趨近於理論隨機值。
+                </p>
+            </div>
+        </div>
+
+        <!-- 右側面板：佔 7 格 -->
+        <div class="lg:col-span-7 flex flex-col gap-6">
+            
+            <!-- 算法原理介紹板 -->
+            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                <h3 class="text-sm font-bold text-indigo-300 flex items-center gap-2 mb-3">
+                    <i class="fa-solid fa-shield-halved"></i> 為什麼這款遊戲能保證「絕對公平」？
+                </h3>
+                <p class="text-xs text-slate-400 leading-relaxed mb-4">
+                    傳統網頁遊戲是「當你按下按鈕，系統才在後台隨機挑選數字」。這代表系統可以看著你的下注額，然後**故意讓你輸**。我們的「可驗證公平」機制消成了這點：
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div class="bg-slate-950/50 p-3 rounded-xl border border-slate-800">
+                        <div class="flex items-center gap-2 mb-1.5">
+                            <span class="w-5 h-5 bg-slate-800 rounded-full flex items-center justify-center text-[10px] text-indigo-400 font-bold">1</span>
+                            <span class="text-xs font-semibold text-slate-200">鎖定結果 (雜湊)</span>
+                        </div>
+                        <p class="text-[11px] text-slate-500">
+                            伺服器種子已由系統預生成，且已展示其不變的 SHA-256 雜湊。系統無法在中途偷換此種子。
+                        </p>
+                    </div>
+                    <div class="bg-slate-950/50 p-3 rounded-xl border border-slate-800">
+                        <div class="flex items-center gap-2 mb-1.5">
+                            <span class="w-5 h-5 bg-slate-800 rounded-full flex items-center justify-center text-[10px] text-indigo-400 font-bold">2</span>
+                            <span class="text-xs font-semibold text-slate-200">你注入隨機性</span>
+                        </div>
+                        <p class="text-[11px] text-slate-500">
+                            你可以自由更換「玩家種子」。因為系統不知道你會改成什麼，所以它**不可能**預謀作弊。
+                        </p>
+                    </div>
+                    <div class="bg-slate-950/50 p-3 rounded-xl border border-slate-800">
+                        <div class="flex items-center gap-2 mb-1.5">
+                            <span class="w-5 h-5 bg-slate-800 rounded-full flex items-center justify-center text-[10px] text-indigo-400 font-bold">3</span>
+                            <span class="text-xs font-semibold text-slate-200">全公開事後核對</span>
+                        </div>
+                        <p class="text-[11px] text-slate-500">
+                            滾動後，點擊「揭露種子」。你會得到伺服器種子明文。拿它與先前的雜湊比對，100% 吻合！
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 加密種子控制台 -->
+            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex flex-col gap-4">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-sm font-bold text-slate-300 flex items-center gap-2">
+                        <i class="fa-solid fa-key text-indigo-400"></i>加密種子控制器 (Active Provably Fair)
+                    </h3>
+                    <button id="btn-rotate-seed" onclick="rotateServerSeed()" class="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors">
+                        <i class="fa-solid fa-arrows-rotate"></i> 旋轉更換新種子
+                    </button>
+                </div>
+
+                <div class="space-y-4 text-xs">
+                    <!-- 1. 當前伺服器種子雜湊 (公開) -->
+                    <div class="space-y-1.5">
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-400 font-medium">當前伺服器種子雜湊 (已在後台鎖定)</span>
+                            <span class="bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full text-[9px] font-mono border border-emerald-500/20">已公開，不可更改</span>
+                        </div>
+                        <div class="relative">
+                            <input type="text" id="active-server-hash" readonly class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 font-mono text-slate-300 pr-10 focus:outline-none focus:border-indigo-500 select-all" value="點選下方生成以開始">
+                            <button onclick="copyToClipboard('active-server-hash')" class="absolute right-3 top-3.5 text-slate-500 hover:text-indigo-400 transition-colors">
+                                <i class="fa-regular fa-copy"></i>
+                            </button>
+                        </div>
+                        <p class="text-[10px] text-slate-500 leading-relaxed">
+                            這是本輪伺服器種子 (Server Seed) 進行 SHA-256 加密後的雜湊值。此結果已固定在伺服器端（本地），一旦擲骰，系統必須提供能算成這個雜湊值的原始種子。
+                        </p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- 2. 玩家種子 (自訂) -->
+                        <div class="space-y-1.5">
+                            <div class="flex justify-between items-center">
+                                <span class="text-slate-400 font-medium">玩家種子 (你可以隨意輸入更改)</span>
+                                <button id="btn-rand-client" onclick="randomizeClientSeed()" class="text-indigo-400 hover:underline text-[10px]">隨機生成</button>
+                            </div>
+                            <div class="relative">
+                                <input type="text" id="active-client-seed" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 font-mono text-slate-200 pr-10 focus:outline-none focus:border-indigo-500" placeholder="幸運符、文字符號、隨機值...">
+                                <button onclick="copyToClipboard('active-client-seed')" class="absolute right-3 top-3.5 text-slate-500 hover:text-indigo-400 transition-colors">
+                                    <i class="fa-regular fa-copy"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 3. 次數 (Nonce) -->
+                        <div class="space-y-1.5">
+                            <span class="text-slate-400 font-medium block">擲骰次數 (Nonce - 每擲一次自動遞增)</span>
+                            <div class="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5">
+                                <i class="fa-solid fa-calculator text-slate-600 mr-2.5"></i>
+                                <span id="active-nonce" class="font-mono text-slate-300 text-sm font-bold">0</span>
+                                <span class="text-[10px] text-slate-500 ml-auto">防止生成重疊結果</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 歷史擲骰紀錄與即時核對區 -->
+            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex flex-col flex-grow">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-sm font-bold text-slate-300 flex items-center gap-2">
+                        <i class="fa-solid fa-clock-rotate-left text-indigo-400"></i>擲骰歷史與「公平性核對驗證」
+                    </h3>
+                    <button onclick="clearHistory()" class="text-xs text-slate-500 hover:text-slate-400">清除紀錄</button>
+                </div>
+
+                <!-- 歷史紀錄面板 -->
+                <div class="overflow-y-auto max-h-[300px] border border-slate-800/80 rounded-2xl bg-slate-950/40">
+                    <table class="w-full text-xs text-left">
+                        <thead class="bg-slate-950 text-[10px] uppercase text-slate-500 font-mono tracking-wider sticky top-0 border-b border-slate-800">
+                            <tr>
+                                <th class="p-4">Nonce</th>
+                                <th class="p-4">投注點數</th>
+                                <th class="p-4">點數結果</th>
+                                <th class="p-4">損益</th>
+                                <th class="p-4">公平驗證碼</th>
+                                <th class="p-4 text-center">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-rows">
+                            <!-- 動態生成歷史 -->
+                            <tr id="empty-history-row">
+                                <td colspan="6" class="p-8 text-center text-slate-500">
+                                    <div class="flex flex-col items-center justify-center gap-2">
+                                        <i class="fa-solid fa-inbox text-2xl opacity-40"></i>
+                                        <span>尚無擲骰紀錄，現在按下「公平擲骰」開啟第一局！</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- 驗證模態窗口 (Modal) -->
+    <div id="verify-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl transition-all scale-95 opacity-0 duration-300" id="verify-modal-box">
+            <!-- 頂部標題 -->
+            <div class="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-shield-check text-emerald-400 text-lg"></i>
+                    <h4 class="font-bold text-slate-200">公開加密原始驗證面板</h4>
+                </div>
+                <button onclick="closeVerifyModal()" class="text-slate-400 hover:text-white text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <!-- 核對內容 -->
+            <div class="p-6 space-y-4 text-xs">
+                <p class="text-slate-400 leading-relaxed">
+                    您可以將以下公布的原始碼數據複製到任何獨立的第三方 SHA-256 線上生成器（例如 <a href="https://www.google.com/search?q=online+sha256+calculator" target="_blank" class="text-indigo-400 underline hover:text-indigo-300">第三方 SHA-256 網頁</a>）中，核對得出的雜湊值與點數是否與本遊戲一致！
+                </p>
+
+                <!-- 第一步：比對伺服器種子與原始雜湊 -->
+                <div class="bg-slate-950 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                    <span class="text-slate-400 font-semibold block">【第一步】驗證伺服器種子是否曾被偷換：</span>
+                    <div>
+                        <span class="text-[10px] text-slate-500 font-mono">伺服器種子原始碼明文 (Server Seed)</span>
+                        <div class="flex items-center bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 mt-1">
+                            <code id="modal-server-seed" class="font-mono text-emerald-400 break-all select-all flex-grow"></code>
+                            <button onclick="copyToClipboard('modal-server-seed')" class="text-slate-500 hover:text-slate-300 ml-2"><i class="fa-regular fa-copy"></i></button>
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-[10px] text-slate-500 font-mono">對其運行 SHA-256 運算後應得之雜湊值 (Calculated Hash)</span>
+                        <div class="bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 text-slate-300 font-mono break-all mt-1">
+                            <span id="modal-calculated-hash"></span>
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-[10px] text-slate-500 font-mono">當初向您公開的雜湊值 (Pre-revealed Hash)</span>
+                        <div class="bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 text-slate-300 font-mono break-all mt-1">
+                            <span id="modal-pre-revealed-hash"></span>
+                        </div>
+                    </div>
+                    <!-- 一致性標籤 -->
+                    <div id="modal-hash-match-banner" class="flex items-center gap-1.5 justify-center py-1 bg-emerald-500/10 text-emerald-400 text-[10px] rounded-lg border border-emerald-500/20">
+                        <i class="fa-solid fa-circle-check"></i> 雜湊值完美匹配！證明在滾動前此種子早已鎖定，且無被篡改。
+                    </div>
+                </div>
+
+                <!-- 第二步：公式計算 -->
+                <div class="bg-slate-950 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                    <span class="text-slate-400 font-semibold block">【第二步】公式運算與點數生成核對：</span>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <span class="text-[10px] text-slate-500">使用的玩家種子 (Client Seed)</span>
+                            <div class="bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 text-slate-300 font-mono mt-1 select-all" id="modal-client-seed"></div>
+                        </div>
+                        <div>
+                            <span class="text-[10px] text-slate-500">次數 (Nonce)</span>
+                            <div class="bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 text-slate-300 font-mono mt-1" id="modal-nonce"></div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <span class="text-[10px] text-slate-500 font-mono">1. 合併計算字串式 (Format: Server_Seed - Client_Seed - Nonce)</span>
+                        <div class="flex items-center bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 mt-1">
+                            <code id="modal-combined-string" class="font-mono text-indigo-300 break-all select-all flex-grow"></code>
+                            <button onclick="copyToClipboard('modal-combined-string')" class="text-slate-500 hover:text-slate-300 ml-2"><i class="fa-regular fa-copy"></i></button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <span class="text-[10px] text-slate-500 font-mono">2. 將合併字串進行 SHA-256 加密後之 Hash 結果</span>
+                        <div class="bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 text-slate-300 font-mono break-all mt-1">
+                            <span id="modal-combined-hash" class="text-indigo-400 font-mono break-all"></span>
+                        </div>
+                    </div>
+
+                    <div>
+                        <span class="text-[10px] text-slate-500 font-mono">3. 取出前 8 個十六進制字元轉為十進制，進行 Modulo 6 加 1 計算</span>
+                        <div class="bg-slate-900 p-3 rounded-lg border border-slate-800 space-y-2 mt-1 font-mono">
+                            <div class="flex justify-between">
+                                <span class="text-slate-500">前 8 字元 (Hex):</span>
+                                <span id="modal-hex-8" class="text-slate-300"></span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-slate-500">轉為整數值:</span>
+                                <span id="modal-integer" class="text-slate-300"></span>
+                            </div>
+                            <div class="flex justify-between border-t border-slate-800/80 pt-1.5 mt-1.5 font-bold">
+                                <span class="text-slate-400">最終運算點數 (整數值 % 6 + 1):</span>
+                                <span id="modal-calculated-result" class="text-indigo-400 text-sm"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- 底部按鈕 -->
+            <div class="p-6 bg-slate-950/30 border-t border-slate-800 flex justify-end">
+                <button onclick="closeVerifyModal()" class="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-colors">
+                    確認關閉
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定義訊息提示 -->
+    <div id="toast-container" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2 max-w-sm w-full"></div>
+
+    <!-- 頁腳 -->
+    <footer class="border-t border-slate-900 bg-slate-950 py-6 px-4 text-center text-xs text-slate-600">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
+            <p>© 2026 FAIRSPIN 絕對公平骰子系統. 開源、透明、科學、可驗證.</p>
+            <div class="flex gap-4">
+                <span class="text-[10px] bg-slate-900 px-2 py-1 rounded border border-slate-800/60 font-mono">Algorithm: SHA-256 Provably Fair</span>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        /* 1. 遊戲核心狀態變數 */
+        let playerChips = 1000;
+        let betAmount = 50;
+        let activeBetType = 'none'; // 'small' | 'big' | 'none'
+        let currentNonce = 0;
+        let isRolling = false;        
+        let activeServerSeed = ""; // 後台伺服器種子明文 (當前這局)
+        let activeServerSeedHash = ""; // 伺服器種子雜湊 (已向用戶公開)
+        let clientSeed = ""; // 玩家種子
+        
+        // 保存局數的詳細資料供揭露驗證，Key 是 Nonce，Value 包含種子明文等資訊
+        let nonceSecrets = {}; 
+        let rollHistory = [];
+        
+        // 骰子點數統計 (1至6出現次數)
+        let distributionCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+        let totalMassRollsCount = 0;
+
+        /* 2. Web Audio 音效 API - 物理碰撞模擬發聲 */
+        let audioCtx = null;
+        function playBounceSound() {
+            try {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+                
+                // 擴展為 5 聲連鎖碰撞，配合 2.2 秒的長旋轉週期，使音效與滾動完美咬合
+                const playBeep = (delay, frequency, duration, volume) => {
+                    setTimeout(() => {
+                        const osc = audioCtx.createOscillator();
+                        const gainNode = audioCtx.createGain();
+                        
+                        osc.type = 'triangle'; // 偏柔和的撞擊聲
+                        osc.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+                        // 快速滑音模擬真實衝擊聲
+                        osc.frequency.exponentialRampToValueAtTime(frequency * 0.4, audioCtx.currentTime + duration);
+                        
+                        gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+                        
+                        osc.connect(gainNode);
+                        gainNode.connect(audioCtx.destination);
+                        
+                        osc.start();
+                        osc.stop(audioCtx.currentTime + duration);
+                    }, delay);
+                };
+
+                // 五段漸次衰減、間距變寬的彈跳撞擊音效
+                playBeep(0, 180, 0.2, 0.4);
+                playBeep(350, 210, 0.16, 0.3);
+                playBeep(800, 190, 0.13, 0.24);
+                playBeep(1300, 160, 0.1, 0.18);
+                playBeep(1800, 140, 0.08, 0.1);
+            } catch (e) {
+                console.warn("音效啟動失敗：需先有頁面互動", e);
+            }
+        }
+
+        
+        // 初始化載入
+        window.onload = function() {
+            randomizeClientSeed();
+            rotateServerSeed(); // 生成初始伺服器端種子
+            updateUI();
+            updateDistributionUI();
+        };
+
+        // 產生長度 16 的十六進制字串作為隨機種子
+        function generateRandomHex(length) {
+            const chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+            let result = '';
+            for (let i = 0; i < length; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        }
+
+        // 玩家隨機玩家種子
+        function randomizeClientSeed() {
+            if (isRolling) return;            const randomSeed = "client_" + generateRandomHex(10);
+            document.getElementById('active-client-seed').value = randomSeed;
+            showToast("玩家種子已隨機更新！");
+        }
+
+        // 旋轉並更換全新的伺服器種子
+        function rotateServerSeed() {
+            if (isRolling) return;            // 生成全新的隨機伺服器種子
+            activeServerSeed = "server_" + generateRandomHex(32);
+            // 立即進行 SHA-256 運算並向用戶展示，證明後台沒有權利私自換骰子
+            activeServerSeedHash = CryptoJS.SHA256(activeServerSeed).toString(CryptoJS.enc.Hex);
+            
+            // 更新 UI 控制台
+            document.getElementById('active-server-hash').value = activeServerSeedHash;
+            
+            // 旋轉重置時，Nonce 歸零，這是為了確保每一次全新的伺服器種子有一條全新的驗證線
+            currentNonce = 0;
+            document.getElementById('active-nonce').innerText = currentNonce;
+            document.getElementById('current-nonce').innerText = "#" + currentNonce;
+            
+            showToast("成功生成全新加密種子！Nonce 已重設為 0");
+        }
+
+        // 【可驗證公平算法核心計算函數】
+        // 給予伺服器種子、玩家種子、次數 Nonce，精準計算出 1~6 的骰子點數
+        function calculateProvablyFairResult(serverSeed, clientSeed, nonce) {
+            // 合併字串: Server_Seed - Client_Seed - Nonce
+            const combinedString = `${serverSeed}-${clientSeed}-${nonce}`;
+            // 利用 SHA-256 算出 64 位元組雜湊
+            const combinedHash = CryptoJS.SHA256(combinedString).toString(CryptoJS.enc.Hex);
+            
+            // 取出雜湊的前 8 個字元 (例如: "e3b0c442")
+            const hex8 = combinedHash.substring(0, 8);
+            // 轉換為 10 進位整數
+            const integerVal = parseInt(hex8, 16);
+            // 執行取模 Modulo 6 再加 1 確保點數落在 1~6
+            const rollValue = (integerVal % 6) + 1;
+            
+            return {
+                combinedString: combinedString,
+                combinedHash: combinedHash,
+                hex8: hex8,
+                integerVal: integerVal,
+                rollValue: rollValue
+            };
+        }
+
+        
+        function rollDice() {
+            const rollButton = document.getElementById('roll-button');
+            if (rollButton.disabled || isRolling) return;
+            // 獲取玩家輸入的即時 Client Seed
+            clientSeed = document.getElementById('active-client-seed').value.trim();
+            if (!clientSeed) {
+                showToast("⚠️ 請輸入有效的玩家種子，哪怕只是一個字！");
+                return;
+            }
+
+            // 扣除投注金額
+            const betInput = parseFloat(document.getElementById('bet-amount').value);
+            if (isNaN(betInput) || betInput < 10) {
+                showToast("⚠️ 最低投注額度為 10 籌碼！");
+                return;
+            }
+            betAmount = betInput;
+
+            if (activeBetType !== 'none') {
+                if (playerChips < betAmount) {
+                    showToast("❌ 您的餘額不足，請更低投注額或點擊右上角重置籌碼！");
+                    return;
+                }
+                playerChips -= betAmount;
+                updateUI();
+            }
+
+            isRolling = true;
+            rollButton.disabled = true;
+            rollButton.classList.add('opacity-70', 'cursor-not-allowed');
+
+            // 鎖定金額輸入框、玩家種子框與快捷鈕
+            document.getElementById('bet-amount').disabled = true;
+            document.getElementById('bet-amount').classList.add('opacity-50', 'cursor-not-allowed');
+            document.getElementById('active-client-seed').disabled = true;
+            document.getElementById('active-client-seed').classList.add('opacity-50', 'cursor-not-allowed');
+            
+            document.getElementById('btn-rand-client').classList.add('opacity-40', 'cursor-not-allowed');
+            document.getElementById('btn-rotate-seed').classList.add('opacity-40', 'cursor-not-allowed');
+
+            ['bet-btn-10', 'bet-btn-50', 'bet-btn-100', 'bet-btn-double'].forEach(id => {
+                document.getElementById(id).disabled = true;
+                document.getElementById(id).classList.add('opacity-50', 'cursor-not-allowed');
+            });
+
+            // 鎖定下注預測選項按鈕外觀
+            ['bet-small', 'bet-big', 'bet-none'].forEach(id => {
+                document.getElementById(id).classList.add('opacity-40', 'cursor-not-allowed');
+            });
+
+            // 增加 Nonce 次數，讓每次擲骰子的加密公式帶入不同變數
+            currentNonce++;
+            document.getElementById('active-nonce').innerText = currentNonce;
+            document.getElementById('current-nonce').innerText = "#" + currentNonce;
+
+            // 立即執行「可驗證公平」計算
+            const pfDetails = calculateProvablyFairResult(activeServerSeed, clientSeed, currentNonce);
+            const rolledNumber = pfDetails.rollValue;
+
+            // 重要：我們立刻將本局的「伺服器原始種子」與所有細節記錄下來。
+            // 這代表哪怕用戶在滾動動畫期間，我們已經將證明歸檔，玩家等一下就可以手動核對這個 Nonce！
+            nonceSecrets[currentNonce] = {
+                serverSeed: activeServerSeed,
+                serverSeedHash: activeServerSeedHash,
+                clientSeed: clientSeed,
+                nonce: currentNonce,
+                combinedString: pfDetails.combinedString,
+                combinedHash: pfDetails.combinedHash,
+                hex8: pfDetails.hex8,
+                integerVal: pfDetails.integerVal,
+                rollValue: rolledNumber
+            };
+
+            // 音效與 3D CSS 旋轉特效
+            playBounceSound();
+            animateCube(rolledNumber);
+
+            // 重要變更：定時器同步提升為 2200ms (與 CSS Transition 的 2.2s 同步)，確保旋轉停穩後才揭露結果
+            setTimeout(() => {
+                // 顯示結果文字
+                const resTextContainer = document.getElementById('roll-result-text');
+                const resSpan = document.getElementById('final-rolled-number');
+                resSpan.innerText = rolledNumber;
+                resTextContainer.classList.remove('opacity-0');
+
+                // 統計累計數據
+                distributionCounts[rolledNumber]++;
+                totalMassRollsCount++;
+                updateDistributionUI();
+
+                // 計算投注賺賠
+                let payout = 0;
+                let isWin = false;
+                
+                if (activeBetType === 'small' && rolledNumber >= 1 && rolledNumber <= 3) {
+                    payout = betAmount * 2;
+                    isWin = true;
+                } else if (activeBetType === 'big' && rolledNumber >= 4 && rolledNumber <= 6) {
+                    payout = betAmount * 2;
+                    isWin = true;
+                }
+
+                if (activeBetType !== 'none') {
+                    if (isWin) {
+                        playerChips += payout;
+                        showToast(`🎉 恭喜！骰出 ${rolledNumber} 點，下注贏得 +${payout} 籌碼！`, 'success');
+                    } else {
+                        showToast(`💸 可惜！骰出 ${rolledNumber} 點，下注輸掉 -${betAmount} 籌碼。`, 'info');
+                    }
+                } else {
+                    showToast(`🎲 純娛樂試玩！骰出 ${rolledNumber} 點！`, 'info');
+                }
+
+                // 添加至歷史列表
+                addRecordToHistory(currentNonce, rolledNumber, activeBetType, isWin ? payout - betAmount : -betAmount);
+
+                isRolling = false;
+                rollButton.disabled = false;
+                rollButton.classList.remove('opacity-70', 'cursor-not-allowed');
+
+                document.getElementById('bet-amount').disabled = false;
+                document.getElementById('bet-amount').classList.remove('opacity-50', 'cursor-not-allowed');
+                document.getElementById('active-client-seed').disabled = false;
+                document.getElementById('active-client-seed').classList.remove('opacity-50', 'cursor-not-allowed');
+
+                document.getElementById('btn-rand-client').classList.remove('opacity-40', 'cursor-not-allowed');
+                document.getElementById('btn-rotate-seed').classList.remove('opacity-40', 'cursor-not-allowed');
+
+                ['bet-btn-10', 'bet-btn-50', 'bet-btn-100', 'bet-btn-double'].forEach(id => {
+                    document.getElementById(id).disabled = false;
+                    document.getElementById(id).classList.remove('opacity-50', 'cursor-not-allowed');
+                });
+
+                // 移除不可點擊樣式
+                ['bet-small', 'bet-big', 'bet-none'].forEach(id => {
+                    document.getElementById(id).classList.remove('opacity-40', 'cursor-not-allowed');
+                });
+
+                // 重整亮起正確的預測外觀
+                selectBetType(activeBetType);
+
+                updateUI();
+            }, 2200);
+        }
+
+        function animateCube(rolledNumber) {
+            const cube = document.getElementById('dice-cube');
+            
+            // 隨機選一個高圈數旋轉，模擬在半空中甩擲的效果
+            const extraX = (Math.floor(Math.random() * 4) + 4) * 360; 
+            const extraY = (Math.floor(Math.random() * 4) + 4) * 360; 
+
+            // 清除現有的 show 樣式，以免過渡不順
+            cube.className = 'cube';
+
+            // 修正 3D 面映射誤差：
+            // 透過將 X/Y 旋轉角度精準與 CSS 面定位對齊，完美解決「點數與顯示結果不符」的錯誤！
+            let rotX = 0, rotY = 0;
+            switch(rolledNumber) {
+                case 1: rotX = 0; rotY = 0; break;
+                case 6: rotX = 0; rotY = 180; break;
+                case 2: rotX = 0; rotY = -90; break; // 修正：從 90 改為 -90，使 face-2 正面朝前
+                case 5: rotX = 0; rotY = 90; break;  // 修正：從 -90 改為 90，使 face-5 正面朝前
+                case 3: rotX = -90; rotY = 0; break; // 修正：從 90 改為 -90，使 face-3 正面朝前
+                case 4: rotX = 90; rotY = 0; break;  // 修正：從 -90 改為 90，使 face-4 正面朝前
+            }
+
+            // 加上高圈旋轉，實現擲出滾動的爽感
+            cube.style.transform = `rotateX(${rotX + extraX}deg) rotateY(${rotY + extraY}deg)`;
+        }
+
+
+        // 選擇下注類型
+        function selectBetType(type) {
+            if (isRolling) return;            activeBetType = type;
+            const btnSmall = document.getElementById('bet-small');
+            const btnBig = document.getElementById('bet-big');
+            const btnNone = document.getElementById('bet-none');
+            const amountContainer = document.getElementById('bet-amount-container');
+
+            // 恢復預設樣式
+            [btnSmall, btnBig, btnNone].forEach(btn => {
+                btn.className = "py-2.5 rounded-xl border border-slate-800 bg-slate-900/50 text-slate-400 hover:bg-slate-800 hover:text-slate-200 text-xs font-medium transition-all active:scale-95 flex flex-col items-center";
+            });
+
+            // 點亮選取樣式
+            if (type === 'small') {
+                btnSmall.className = "py-2.5 rounded-xl border border-indigo-500/50 bg-indigo-500/20 text-indigo-200 text-xs font-bold transition-all active:scale-95 flex flex-col items-center shadow-lg shadow-indigo-500/10";
+                amountContainer.style.opacity = "1";
+            } else if (type === 'big') {
+                btnBig.className = "py-2.5 rounded-xl border border-indigo-500/50 bg-indigo-500/20 text-indigo-200 text-xs font-bold transition-all active:scale-95 flex flex-col items-center shadow-lg shadow-indigo-500/10";
+                amountContainer.style.opacity = "1";
+            } else {
+                btnNone.className = "py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-slate-200 text-xs font-bold transition-all active:scale-95 flex flex-col items-center";
+                amountContainer.style.opacity = "0.5";
+            }
+        }
+
+        // 更改下注額
+        function setBetAmount(amount) {
+            if (isRolling) return;            document.getElementById('bet-amount').value = amount;
+        }
+
+        function multiplyBet(factor) {
+            if (isRolling) return;            const curVal = parseFloat(document.getElementById('bet-amount').value) || 50;
+            document.getElementById('bet-amount').value = Math.max(10, Math.floor(curVal * factor));
+        }
+
+        // 大數據公平性一鍵模擬器
+        function generateMassRolls(count) {
+            if (isRolling) return;            const simClientSeed = document.getElementById('active-client-seed').value.trim() || "sim_seed";
+            
+            showToast(`⚙️ 正在啟動 SHA-256 可驗證算法，瞬間生成 ${count} 筆交易...`);
+
+            // 模擬這批擲骰，沿用當前伺服器種子
+            for (let i = 0; i < count; i++) {
+                currentNonce++;
+                const pf = calculateProvablyFairResult(activeServerSeed, simClientSeed, currentNonce);
+                const rolledNumber = pf.rollValue;
+
+                // 記錄祕鑰供歷史比對
+                nonceSecrets[currentNonce] = {
+                    serverSeed: activeServerSeed,
+                    serverSeedHash: activeServerSeedHash,
+                    clientSeed: simClientSeed,
+                    nonce: currentNonce,
+                    combinedString: pf.combinedString,
+                    combinedHash: pf.combinedHash,
+                    hex8: pf.hex8,
+                    integerVal: pf.integerVal,
+                    rollValue: rolledNumber
+                };
+
+                // 累加統計
+                distributionCounts[rolledNumber]++;
+                totalMassRollsCount++;
+
+                // 批次中的最後幾筆加入歷史面板
+                if (i >= count - 5) {
+                    addRecordToHistory(currentNonce, rolledNumber, 'none', 0);
+                }
+            }
+
+            document.getElementById('active-nonce').innerText = currentNonce;
+            document.getElementById('current-nonce').innerText = "#" + currentNonce;
+
+            setTimeout(() => {
+                updateUI();
+                updateDistributionUI();
+                showToast(`📊 模擬 ${count} 擲骰已全部處理！請查看統計直方圖。`, 'success');
+            }, 300);
+        }
+
+
+        // 刷新基本 UI 變數
+        function updateUI() {
+            document.getElementById('player-chips').innerText = playerChips.toLocaleString();
+        }
+
+        // 更新大數據分配直方圖
+        function updateDistributionUI() {
+            const container = document.getElementById('distribution-container');
+            container.innerHTML = '';
+
+            for (let face = 1; face <= 6; face++) {
+                const count = distributionCounts[face];
+                // 計算比例
+                const percent = totalMassRollsCount > 0 ? ((count / totalMassRollsCount) * 100).toFixed(1) : "0.0";
+                
+                // 產生條形圖
+                container.innerHTML += `
+                    <div class="flex items-center gap-3">
+                        <span class="w-6 text-xs text-slate-400 font-mono font-bold text-center">🎲 ${face}</span>
+                        <div class="flex-grow bg-slate-950 h-5 rounded-md overflow-hidden border border-slate-800 flex items-center">
+                            <div class="bg-gradient-to-r from-indigo-500 to-indigo-400 h-full rounded-md transition-all duration-500 flex items-center justify-end pr-2" style="width: ${Math.max(4, percent)}%">
+                                ${parseFloat(percent) > 10 ? `<span class="text-[9px] text-white font-mono font-bold">${percent}%</span>` : ''}
+                            </div>
+                        </div>
+                        <span class="w-16 text-right text-[10px] text-slate-500 font-mono">${count} 次 ${parseFloat(percent) <= 10 ? `(${percent}%)` : ''}</span>
+                    </div>
+                `;
+            }
+        }
+
+        // 插入歷史紀錄
+        function addRecordToHistory(nonce, rolledNumber, betType, profit) {
+            const emptyRow = document.getElementById('empty-history-row');
+            if (emptyRow) emptyRow.remove();
+
+            const tbody = document.getElementById('history-rows');
+            const tr = document.createElement('tr');
+            tr.className = "border-b border-slate-800 hover:bg-slate-900/30 transition-all font-mono";
+
+            let betTypeStr = "純娛樂";
+            if (betType === 'small') betTypeStr = "小 (1-3)";
+            if (betType === 'big') betTypeStr = "大 (4-6)";
+
+            let profitCell = `<span class="text-slate-500">-</span>`;
+            if (betType !== 'none') {
+                if (profit >= 0) {
+                    profitCell = `<span class="text-emerald-400 font-bold">+${profit}</span>`;
+                } else {
+                    profitCell = `<span class="text-rose-400 font-bold">${profit}</span>`;
+                }
+            }
+
+            // 公平驗證狀態徽章
+            const pfBadge = `<span class="bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded-full text-[9px] border border-indigo-500/20 flex items-center gap-1 w-max">
+                <i class="fa-solid fa-signature"></i> 點選右側驗證
+            </span>`;
+
+            tr.innerHTML = `
+                <td class="p-4 font-bold text-slate-400">#${nonce}</td>
+                <td class="p-4 text-slate-300 text-[11px]">${betTypeStr}</td>
+                <td class="p-4"><span class="bg-slate-800 text-indigo-300 text-xs font-black px-2.5 py-1 rounded-lg">${rolledNumber}</span></td>
+                <td class="p-4">${profitCell}</td>
+                <td class="p-4">${pfBadge}</td>
+                <td class="p-4 text-center">
+                    <button onclick="openVerifyModal(${nonce})" class="text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 px-2.5 py-1 rounded-lg border border-indigo-500/30 font-sans text-[11px] font-bold transition-all">
+                        <i class="fa-solid fa-magnifying-glass-chart mr-1"></i> 揭露與驗證
+                    </button>
+                </td>
+            `;
+
+            // 置頂插入
+            tbody.insertBefore(tr, tbody.firstChild);
+        }
+
+
+        // 開啟驗證視窗並把公式塞進去
+        function openVerifyModal(nonce) {
+            const data = nonceSecrets[nonce];
+            if (!data) {
+                showToast("⚠️ 找不到該局的加密祕鑰資訊！");
+                return;
+            }
+
+            document.getElementById('modal-server-seed').innerText = data.serverSeed;
+            document.getElementById('modal-calculated-hash').innerText = CryptoJS.SHA256(data.serverSeed).toString(CryptoJS.enc.Hex);
+            document.getElementById('modal-pre-revealed-hash').innerText = data.serverSeedHash;
+            
+            document.getElementById('modal-client-seed').innerText = data.clientSeed;
+            document.getElementById('modal-nonce').innerText = data.nonce;
+            document.getElementById('modal-combined-string').innerText = data.combinedString;
+            document.getElementById('modal-combined-hash').innerText = data.combinedHash;
+            
+            document.getElementById('modal-hex-8').innerText = data.hex8;
+            document.getElementById('modal-integer').innerText = data.integerVal.toLocaleString();
+            
+            // 計算展示
+            document.getElementById('modal-calculated-result').innerText = `${data.integerVal} % 6 + 1 = 🎲 ${data.rollValue} 點`;
+
+            // 顯示 Modal
+            const modal = document.getElementById('verify-modal');
+            const modalBox = document.getElementById('verify-modal-box');
+            
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                modalBox.classList.remove('scale-95', 'opacity-0');
+            }, 10);
+        }
+
+        function closeVerifyModal() {
+            const modal = document.getElementById('verify-modal');
+            const modalBox = document.getElementById('verify-modal-box');
+            
+            modalBox.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300);
+        }
+
+
+        // 重置籌碼
+        function resetChips() {
+            playerChips = 1000;
+            updateUI();
+            showToast("💰 您的虛擬籌碼已恢復至 1,000！");
+        }
+
+        // 清除歷史
+        function clearHistory() {
+            const tbody = document.getElementById('history-rows');
+            tbody.innerHTML = `
+                <tr id="empty-history-row">
+                    <td colspan="6" class="p-8 text-center text-slate-500">
+                        <div class="flex flex-col items-center justify-center gap-2">
+                            <i class="fa-solid fa-inbox text-2xl opacity-40"></i>
+                            <span>紀錄已清除</span>
+                        </div>
+                    </td>
+                </tr>
+            `;
+            nonceSecrets = {};
+            showToast("歷史紀錄已清除。");
+        }
+
+        // 複製到剪貼簿功能
+        function copyToClipboard(elementId) {
+            const textEl = document.getElementById(elementId);
+            let textToCopy = "";
+            
+            if (textEl.tagName === 'INPUT') {
+                textToCopy = textEl.value;
+            } else {
+                textToCopy = textEl.innerText;
+            }
+
+            const tempInput = document.createElement("input");
+            tempInput.value = textToCopy;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            
+            try {
+                document.execCommand("copy");
+                showToast("📋 成功複製資料到剪貼簿！");
+            } catch (err) {
+                showToast("❌ 複製失敗，請手動圈選文字複製。");
+            }
+            document.body.removeChild(tempInput);
+        }
+
+        // 自訂漂亮通知 Toast
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            let bgClass = "bg-slate-900 border-slate-800 text-slate-300";
+            let iconClass = "fa-solid fa-circle-info text-indigo-400";
+            
+            if (type === 'success') {
+                bgClass = "bg-emerald-950/90 border-emerald-800/80 text-emerald-200";
+                iconClass = "fa-solid fa-circle-check text-emerald-400";
+            } else if (type === 'warning') {
+                bgClass = "bg-amber-950/90 border-amber-800/80 text-amber-200";
+                iconClass = "fa-solid fa-triangle-exclamation text-amber-400";
+            }
+
+            toast.className = `${bgClass} border px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 transition-all duration-300 transform translate-y-2 opacity-0 text-xs font-semibold`;
+            toast.innerHTML = `<i class="${iconClass} text-sm"></i> <span>${message}</span>`;
+            
+            container.appendChild(toast);
+            
+            // 進場動畫
+            setTimeout(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            }, 10);
+
+            // 3 秒後自動消除
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => {
+                    toast.remove();
+                }, 300);
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
